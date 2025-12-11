@@ -1,1 +1,1 @@
-cp Run-TestsWithCoverage.ps1 ./CoverageDemo/
+Copy-Item -Path "Test-Coverage.ps1" -Destination "CoverageDemo/CoverageDemo.Tests/"

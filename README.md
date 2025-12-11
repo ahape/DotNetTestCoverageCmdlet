@@ -1,19 +1,19 @@
-# How to Verify Run-TestsWithCoverage Actually Works
+# How to Verify Test-Coverage Actually Works
 
-Save your refactored script as `Run-TestsWithCoverage.ps1` in the `CoverageDemo/CoverageDemo.Tests` folder.
+Save your refactored script as `Test-Coverage.ps1` in the `CoverageDemo/CoverageDemo.Tests` folder.
 
 ### 1. Test Filter: Namespace
 
 Run only tests in the `Logic` namespace. `StringHelperTests` should NOT run.
 
 ```ps1
-.\Run-TestsWithCoverage.ps1 -TestNamespace "CoverageDemo.Tests.Logic"
+.\Test-Coverage.ps1 -TestNamespace "CoverageDemo.Tests.Logic"
 ```
 
 ### 2. Test Filter: Class
 
 ```ps1
-.\Run-TestsWithCoverage.ps1 -TestClass "CalculatorTests"
+.\Test-Coverage.ps1 -TestClass "CalculatorTests"
 ```
 
 ### 3. Test Filter: Method
@@ -21,7 +21,7 @@ Run only tests in the `Logic` namespace. `StringHelperTests` should NOT run.
 Run only the Add test. The `Subtract` test should be skipped.
 
 ```ps1
-.\Run-TestsWithCoverage.ps1 -TestClass "CalculatorTests" -TestMethod "Add_ReturnsSum"
+.\Test-Coverage.ps1 -TestClass "CalculatorTests" -TestMethod "Add_ReturnsSum"
 ```
 
 ### 4. Coverage Filter: Namespace
@@ -29,7 +29,7 @@ Run only the Add test. The `Subtract` test should be skipped.
 Run all tests, but only show coverage for `CoverageDemo.Core.Utils`. The report should show 0% coverage for `Calculator` (it will be excluded from the report entirely or grayed out depending on settings).
 
 ```ps1
-.\Run-TestsWithCoverage.ps1 -CoverNamespace "CoverageDemo.Core.Utils"
+.\Test-Coverage.ps1 -CoverNamespace "CoverageDemo.Core.Utils"
 ```
 
 ### 5. Coverage Filter: Class
@@ -37,5 +37,5 @@ Run all tests, but only show coverage for `CoverageDemo.Core.Utils`. The report 
 Run all tests, but only show coverage for the `Calculator` class.
 
 ```ps1
-.\Run-TestsWithCoverage.ps1 -CoverClass "Calculator"
+.\Test-Coverage.ps1 -CoverClass "Calculator"
 ```
