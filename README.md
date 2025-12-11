@@ -1,4 +1,4 @@
-# How to Verify Your Script
+# How to Verify Run-TestsWithCoverage Actually Works
 
 Save your refactored script as `Run-TestsWithCoverage.ps1` in the `CoverageDemo/CoverageDemo.Tests` folder.
 
