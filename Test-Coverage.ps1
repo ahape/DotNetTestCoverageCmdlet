@@ -28,6 +28,10 @@
 
 .EXAMPLE
     .\Test-Coverage.ps1 -TestClass "OrderServiceTests" -CoverClass "OrderService"
+
+.NOTES
+    Download the latest version of this file at:
+    https://github.com/ahape/DotNetTestCoverageCmdlet/master/Test-Coverage.ps1
 #>
 [CmdletBinding()]
 param(
