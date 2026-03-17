@@ -30,126 +30,142 @@
     .\Test-Coverage.ps1 -TestClass "OrderServiceTests" -CoverClass "OrderService"
 
 .NOTES
-    Download the latest version of this file at:
-    https://github.com/ahape/DotNetTestCoverageCmdlet/master/Test-Coverage.ps1
+    The canonical version of this script is maintained in the brightmetrics/projects-plugin repository:
+    https://github.com/brightmetrics/projects-plugin/blob/master/scripts/Test-Coverage.ps1
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$false, HelpMessage="Filter tests by Namespace.")]
+    [Parameter(HelpMessage="Filter tests by Namespace.")]
     [string]$TestNamespace,
 
-    [Parameter(Mandatory=$false, HelpMessage="Filter tests by Class name.")]
+    [Parameter(HelpMessage="Filter tests by Class name.")]
     [string]$TestClass,
 
-    [Parameter(Mandatory=$false, HelpMessage="Filter tests by Method name.")]
+    [Parameter(HelpMessage="Filter tests by Method name.")]
     [string]$TestMethod,
 
-    [Parameter(Mandatory=$false, HelpMessage="Filter coverage report by Namespace.")]
+    [Parameter(HelpMessage="Filter coverage report by Namespace.")]
     [string]$CoverNamespace,
 
-    [Parameter(Mandatory=$false, HelpMessage="Filter coverage report by Class.")]
+    [Parameter(HelpMessage="Filter coverage report by Class.")]
     [string]$CoverClass
 )
 
-Set-Location $PSScriptRoot
+Push-Location $PSScriptRoot
 
-# --- Configuration ---
-$toolsDir       = Join-Path $PSScriptRoot ".tools"
-$reportDir      = Join-Path $PSScriptRoot "coverage"
-$testResultsDir = Join-Path $PSScriptRoot "TestResults"
-$reportGenName  = "dotnet-reportgenerator-globaltool"
+try {
+    # --- Configuration ---
+    $toolsDir       = Join-Path $PSScriptRoot ".tools"
+    $reportDir      = Join-Path $PSScriptRoot "coverage"
+    $testResultsDir = Join-Path $PSScriptRoot "TestResults"
+    $reportGenName  = "dotnet-reportgenerator-globaltool"
 
-# --- 1. Prerequisite Check: Coverlet ---
-# Scan for the package reference to avoid the confusing "Data collector not found" error
-$projFiles = Get-ChildItem *.csproj -Recurse
-if ($projFiles) {
-    $hasCoverlet = Select-String -Path $projFiles.FullName -Pattern "coverlet.collector" -SimpleMatch -Quiet
-    if (-not $hasCoverlet) {
-        Write-Host "ERROR: Missing 'coverlet.collector' package." -ForegroundColor Red
-        Write-Host "Run this in your test project: dotnet add package coverlet.collector" -ForegroundColor Yellow
+    # Modern OS Detection ($IsWindows is null in Windows PS 5.1)
+    $isWindowsOS    = [bool]($IsWindows -or ($env:OS -eq 'Windows_NT'))
+
+    # Path setup
+    $reportGenExe   = Join-Path $toolsDir "reportgenerator.exe"
+    $reportGenNix   = Join-Path $toolsDir "reportgenerator"
+
+    # --- 1. Prerequisite Check: Coverlet ---
+    # Scan for the package reference to avoid the confusing "Data collector not found" error
+    $projFiles = Get-ChildItem *.csproj -Recurse
+    if ($projFiles) {
+        $hasCoverlet = Select-String -Path $projFiles.FullName -Pattern "coverlet.collector" -SimpleMatch -Quiet
+        if (-not $hasCoverlet) {
+            Write-Host "ERROR: Missing 'coverlet.collector' package." -ForegroundColor Red
+            Write-Host "Run this in your test project: dotnet add package coverlet.collector" -ForegroundColor Yellow
+            exit 1
+        }
+    }
+
+    # --- 2. Setup: Install ReportGenerator locally (Portable) ---
+    if (-not (Test-Path $reportGenExe) -and -not (Test-Path $reportGenNix)) {
+        Write-Host "Installing ReportGenerator locally to '$toolsDir'..." -ForegroundColor Cyan
+        & dotnet tool install $reportGenName --tool-path $toolsDir
+    }
+
+    # --- 3. Cleanup ---
+    Write-Host "Cleaning up previous results..." -ForegroundColor Gray
+    if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force }
+    if (Test-Path $testResultsDir) { Remove-Item $testResultsDir -Recurse -Force }
+
+    # --- 4. Execution: Run Tests ---
+    Write-Host "Running tests..." -ForegroundColor Cyan
+
+    # Prepare Test Filter
+    # We use logic AND (&) so we can drill down: Namespace -> Class -> Method
+    $filterParts = @()
+    if (-not [string]::IsNullOrWhiteSpace($TestNamespace)) { $filterParts += "FullyQualifiedName~$TestNamespace" }
+    if (-not [string]::IsNullOrWhiteSpace($TestClass))     { $filterParts += "FullyQualifiedName~$TestClass" }
+    if (-not [string]::IsNullOrWhiteSpace($TestMethod))    { $filterParts += "FullyQualifiedName~$TestMethod" }
+
+    # Build Args
+    $testArgs = @("test", "--collect", "XPlat Code Coverage")
+
+    if ($filterParts.Count -gt 0) {
+        $filterString = $filterParts -join "&"
+        Write-Verbose "Applying Test Filter: $filterString"
+        $testArgs += "--filter", $filterString
+    }
+
+    # Run Dotnet Test
+    & dotnet $testArgs
+
+    # Check exit code immediately
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Tests failed. Report generation skipped." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+
+    # --- 5. Reporting: Generate HTML ---
+    Write-Host "Tests finished. Generating report..." -ForegroundColor Cyan
+
+    # Determine the correct local executable path
+    $genCommand = if ($isWindowsOS) { $reportGenExe } else { $reportGenNix }
+
+    # Prepare Coverage Filter (ReportGenerator -classfilters)
+    # Defaults to "+*" (include everything) if no params provided
+    $covFilters = @()
+    if (-not [string]::IsNullOrWhiteSpace($CoverNamespace)) { $covFilters += "+${CoverNamespace}*" }
+    if (-not [string]::IsNullOrWhiteSpace($CoverClass))     { $covFilters += "+*.${CoverClass}" }
+
+    $finalClassFilter = if ($covFilters.Count -gt 0) { $covFilters -join ";" } else { "+*" }
+
+    Write-Verbose "Applying Coverage Filter: $finalClassFilter"
+
+    # Run ReportGenerator
+    $reportPattern = (Join-Path $testResultsDir '**/coverage.cobertura.xml') -replace '\\','/'
+    & $genCommand -reports:$reportPattern `
+                  -targetdir:$reportDir `
+                  -reporttypes:"Html;TextSummary" `
+                  -classfilters:$finalClassFilter
+
+    # --- 6. Finish ---
+    $reportFile = Join-Path $reportDir 'index.html'
+    if (Test-Path $reportFile) {
+        Write-Host "Success! Opening report: $reportFile" -ForegroundColor Green
+
+        # Wrapped in a try block to prevent errors on headless CI/CD Build Servers
+        try {
+            Invoke-Item $reportFile -ErrorAction Stop
+        } catch {
+            Write-Verbose "Could not invoke report file. This is normal in headless environments."
+        }
+
+        try {
+            Write-Output "<CoverageSummary>"
+            $summaryFile = Join-Path $reportDir 'Summary.txt'
+            Get-Content $summaryFile -Raw -ErrorAction Stop
+            Write-Output "</CoverageSummary>"
+        } catch {
+            Write-Warning "Could not read Summary.txt. It may be missing or locked."
+        }
+    } else {
+        Write-Host "Report file not found. Something went wrong generating the report." -ForegroundColor Red
         exit 1
     }
 }
-
-# --- 2. Setup: Install ReportGenerator locally (Portable) ---
-if (-not (Test-Path "$toolsDir\reportgenerator.exe") -and -not (Test-Path "$toolsDir\reportgenerator")) {
-    Write-Host "Installing ReportGenerator locally to '$toolsDir'..." -ForegroundColor Cyan
-    dotnet tool install $reportGenName --tool-path $toolsDir
-}
-
-# --- 3. Cleanup ---
-Write-Host "Cleaning up previous results..." -ForegroundColor Gray
-if (Test-Path $reportDir) { Remove-Item $reportDir -Recurse -Force | Out-Null }
-if (Test-Path $testResultsDir) { Remove-Item $testResultsDir -Recurse -Force | Out-Null }
-
-# --- 4. Execution: Run Tests ---
-Write-Host "Running tests..." -ForegroundColor Cyan
-
-# Prepare Test Filter
-# We use logic AND (&) so we can drill down: Namespace -> Class -> Method
-$filterParts = @()
-if (-not [string]::IsNullOrWhiteSpace($TestNamespace)) { $filterParts += "FullyQualifiedName~$TestNamespace" }
-if (-not [string]::IsNullOrWhiteSpace($TestClass))     { $filterParts += "FullyQualifiedName~$TestClass" }
-if (-not [string]::IsNullOrWhiteSpace($TestMethod))    { $filterParts += "FullyQualifiedName~$TestMethod" }
-
-# Build Args
-$testArgs = @("test", "--collect", "XPlat Code Coverage")
-
-if ($filterParts.Count -gt 0) {
-    $filterString = $filterParts -join "&"
-    Write-Verbose "Applying Test Filter: $filterString"
-    $testArgs += "--filter"
-    $testArgs += $filterString
-}
-
-# Run Dotnet Test
-& dotnet $testArgs
-
-# Check exit code immediately
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Tests failed. Report generation skipped." -ForegroundColor Red
-    exit $LASTEXITCODE
-}
-
-# --- 5. Reporting: Generate HTML ---
-Write-Host "Tests finished. Generating report..." -ForegroundColor Cyan
-
-# Determine the correct local executable path
-$genCommand = "$toolsDir\reportgenerator"
-if ($IsWindows) { $genCommand = "$toolsDir\reportgenerator.exe" }
-
-# Prepare Coverage Filter (ReportGenerator -classfilters)
-# Defaults to "+*" (include everything) if no params provided
-$covFilters = @()
-if (-not [string]::IsNullOrWhiteSpace($CoverNamespace)) { $covFilters += "+${CoverNamespace}*" }
-if (-not [string]::IsNullOrWhiteSpace($CoverClass))     { $covFilters += "+*.${CoverClass}" }
-
-$finalClassFilter = "+*"
-if ($covFilters.Count -gt 0) {
-    # Combine with semicolon (ReportGenerator syntax)
-    $finalClassFilter = $covFilters -join ";"
-}
-
-Write-Verbose "Applying Coverage Filter: $finalClassFilter"
-
-# Run ReportGenerator
-& $genCommand -reports:"$testResultsDir\**\coverage.cobertura.xml" `
-              -targetdir:$reportDir `
-              -reporttypes:"Html;TextSummary" `
-              -classfilters:$finalClassFilter
-
-# --- 6. Finish ---
-$reportFile = "$reportDir\index.html"
-if (Test-Path $reportFile) {
-    Write-Host "Success! Opening report: $reportFile" -ForegroundColor Green
-    Invoke-Item $reportFile
-    try {
-        Write-Host "<CoverageSummary>" -ForegroundColor Black
-        Get-Content "$reportDir\Summary.txt" -Raw -ErrorAction Stop
-        Write-Host "</CoverageSummary>" -ForegroundColor Black
-    } catch {
-        Write-Warning "Could not read Summary.txt. It may be missing or locked."
-    }
-} else {
-    Write-Host "Report file not found. Something went wrong generating the report." -ForegroundColor Red
+finally {
+    Pop-Location
 }
