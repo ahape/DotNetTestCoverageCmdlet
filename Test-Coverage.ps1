@@ -135,7 +135,7 @@ Write-Verbose "Applying Coverage Filter: $finalClassFilter"
 # Run ReportGenerator
 & $genCommand -reports:"$testResultsDir\**\coverage.cobertura.xml" `
               -targetdir:$reportDir `
-              -reporttypes:Html `
+              -reporttypes:"Html;TextSummary" `
               -classfilters:$finalClassFilter
 
 # --- 6. Finish ---
@@ -143,6 +143,13 @@ $reportFile = "$reportDir\index.html"
 if (Test-Path $reportFile) {
     Write-Host "Success! Opening report: $reportFile" -ForegroundColor Green
     Invoke-Item $reportFile
+    try {
+        Write-Host "<CoverageSummary>" -ForegroundColor Black
+        Get-Content "$reportDir\Summary.txt" -Raw -ErrorAction Stop
+        Write-Host "</CoverageSummary>" -ForegroundColor Black
+    } catch {
+        Write-Warning "Could not read Summary.txt. It may be missing or locked."
+    }
 } else {
     Write-Host "Report file not found. Something went wrong generating the report." -ForegroundColor Red
 }
